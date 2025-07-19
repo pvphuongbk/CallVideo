@@ -6,6 +6,7 @@
 
 <select id="userList"></select>
 <button id="callButton">Voice Call</button>
+<div id="callNotification" style="display:none; background:yellow; padding:10px; margin-top:10px;"></div>
 
 <br />
 <br />
@@ -52,7 +53,6 @@
 
     // Khi user nhận được danh sách user online
     connection.on("ReceiveUserList", function (userList) {
-        console.log("Received user list: ", userList);
         let userSelect = document.getElementById("userList");
         userSelect.innerHTML = '';
 
@@ -68,7 +68,6 @@
 
     // Khi user ngắt kết nối
     connection.on("UserDisconnected", function (userId) {
-        console.log("User disconnected: " + userId);
         let userSelect = document.getElementById("userList");
         for (let i = 0; i < userSelect.options.length; i++) {
             if (userSelect.options[i].value === userId) {
@@ -78,7 +77,21 @@
         }
     });
 
-    // Khi nhận được offer
+    connection.on("ReceiveCall", function (fromConnectionId) {
+        const callNotification = document.getElementById("callNotification");
+        callNotification.innerHTML = `Cuộc gọi đến từ: ${fromConnectionId} <button onclick="acceptCall('${fromConnectionId}')">Chấp nhận</button>`;
+        callNotification.style.display = "block";
+    });
+
+    connection.on("CallAccepted", async (toConnectionId) => {
+        if (!localStream) await startLocalStream();
+        createPeerConnection();
+
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        connection.invoke("SendOffer", toConnectionId, JSON.stringify(offer));
+    });
+
     connection.on("ReceiveOffer", async (fromConnectionId, offer) => {
         targetConnectionId = fromConnectionId;
         await startLocalStream();
@@ -111,21 +124,19 @@
             return;
         }
 
-        console.log("Calling user: " + targetConnectionId);
         if (!localStream) {
             alert('Không tìm thấy camera/micro. Vui lòng kiểm tra thiết bị.');
             return;
         }
 
-        createPeerConnection();
-
-        const offer = await peerConnection.createOffer();
-        await peerConnection.setLocalDescription(offer);
-
-        connection.invoke("SendOffer", targetConnectionId, JSON.stringify(offer))
-            .catch(err => console.error(err.toString()));
+        connection.invoke("CallUser", targetConnectionId);
     });
 
+    async function acceptCall(fromConnectionId) {
+        document.getElementById("callNotification").style.display = "none";
+        targetConnectionId = fromConnectionId;
+        await connection.invoke("AcceptCall", fromConnectionId);
+    }
 
     // Mở camera/micro
     async function startLocalStream() {

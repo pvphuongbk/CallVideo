@@ -6,6 +6,7 @@
 
 <select id="userList"></select>
 <button id="callVideoButton">Video Call</button>
+<div id="callNotification" style="display:none; background:yellow; padding:10px; margin-top:10px;"></div>
 
 <br />
 <br />
@@ -24,7 +25,6 @@
     let userList = [];
     const configuration = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
-    // Kết nối SignalR
     connection.start().then(() => {
         console.log("SignalR connected.");
         startLocalStream();
@@ -32,15 +32,12 @@
         return console.error(err.toString());
     });
 
-    // Nhận ID của mình
     connection.on("ReceiveYourId", function (connectionId) {
         myConnectionId = connectionId;
     });
 
-    // Khi user mới kết nối
     connection.on("UserConnected", function (userId) {
-        console.log("User connected: " + userId);
-        if (userId === myConnectionId) return; // Không thêm chính mình
+        if (userId === myConnectionId) return;
         let userList = document.getElementById("userList");
         let option = document.createElement("option");
         option.value = userId;
@@ -48,12 +45,9 @@
         userList.appendChild(option);
     });
 
-    // Khi user nhận được danh sách user online
     connection.on("ReceiveUserList", function (userList) {
-        console.log("Received user list: ", userList);
         let userSelect = document.getElementById("userList");
         userSelect.innerHTML = '';
-
         userList.forEach(function (userId) {
             if (userId !== myConnectionId) {
                 let option = document.createElement("option");
@@ -64,9 +58,7 @@
         });
     });
 
-    // Khi user ngắt kết nối
     connection.on("UserDisconnected", function (userId) {
-        console.log("User disconnected: " + userId);
         let userSelect = document.getElementById("userList");
         for (let i = 0; i < userSelect.options.length; i++) {
             if (userSelect.options[i].value === userId) {
@@ -76,7 +68,21 @@
         }
     });
 
-    // Khi nhận được offer
+    connection.on("ReceiveCall", function (fromConnectionId) {
+        const callNotification = document.getElementById("callNotification");
+        callNotification.innerHTML = `Cuộc gọi đến từ: ${fromConnectionId} <button onclick="acceptCall('${fromConnectionId}')">Chấp nhận</button>`;
+        callNotification.style.display = "block";
+    });
+
+    connection.on("CallAccepted", async (toConnectionId) => {
+        if (!localStream) await startLocalStream();
+        createPeerConnection();
+
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        connection.invoke("SendOffer", toConnectionId, JSON.stringify(offer));
+    });
+
     connection.on("ReceiveOffer", async (fromConnectionId, offer) => {
         targetConnectionId = fromConnectionId;
         await startLocalStream();
@@ -85,23 +91,19 @@
         await peerConnection.setRemoteDescription(new RTCSessionDescription(JSON.parse(offer)));
         const answer = await peerConnection.createAnswer();
         await peerConnection.setLocalDescription(answer);
-
         connection.invoke("SendAnswer", targetConnectionId, JSON.stringify(answer));
     });
 
-    // Khi nhận được answer
     connection.on("ReceiveAnswer", async (fromConnectionId, answer) => {
         await peerConnection.setRemoteDescription(new RTCSessionDescription(JSON.parse(answer)));
     });
 
-    // Khi nhận được ICE Candidate
     connection.on("ReceiveIceCandidate", async (fromConnectionId, candidate) => {
         if (peerConnection) {
             await peerConnection.addIceCandidate(new RTCIceCandidate(JSON.parse(candidate)));
         }
     });
 
-    // Sự kiện click nút Call
     document.getElementById("callVideoButton").addEventListener("click", async () => {
         targetConnectionId = document.getElementById("userList").value;
         if (!targetConnectionId) {
@@ -114,16 +116,15 @@
             return;
         }
 
-        createPeerConnection();
-
-        const offer = await peerConnection.createOffer();
-        await peerConnection.setLocalDescription(offer);
-
-        connection.invoke("SendOffer", targetConnectionId, JSON.stringify(offer))
-            .catch(err => console.error(err.toString()));
+        connection.invoke("CallUser", targetConnectionId);
     });
 
-    // Mở camera/micro
+    async function acceptCall(fromConnectionId) {
+        document.getElementById("callNotification").style.display = "none";
+        targetConnectionId = fromConnectionId;
+        await connection.invoke("AcceptCall", fromConnectionId);
+    }
+
     async function startLocalStream() {
         try {
             localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
@@ -134,7 +135,6 @@
         }
     }
 
-    // Tạo peer connection
     function createPeerConnection() {
         if (!localStream) {
             alert('Camera chưa được bật hoặc không truy cập được.');
@@ -142,7 +142,6 @@
         }
 
         peerConnection = new RTCPeerConnection(configuration);
-
         localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
 
         peerConnection.ontrack = event => {

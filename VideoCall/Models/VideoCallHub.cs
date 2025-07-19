@@ -4,6 +4,7 @@ using System;
 public class VideoCallHub : Hub
 {
     public static List<string> ConnectedUsers = new List<string>();
+
     public override async Task OnConnectedAsync()
     {
         ConnectedUsers.Add(Context.ConnectionId);
@@ -19,18 +20,22 @@ public class VideoCallHub : Hub
 
         await base.OnConnectedAsync();
     }
+
     public async Task CallUser(string connectionId)
     {
         await Clients.Client(connectionId).SendAsync("ReceiveCall", Context.ConnectionId);
     }
 
+    public async Task AcceptCall(string callerConnectionId)
+    {
+        var calleeConnectionId = Context.ConnectionId;
+        await Clients.Client(callerConnectionId).SendAsync("CallAccepted", calleeConnectionId);
+    }
+
     public override async Task OnDisconnectedAsync(Exception exception)
     {
         ConnectedUsers.Remove(Context.ConnectionId);
-
-        // Thông báo ngắt kết nối
         await Clients.All.SendAsync("UserDisconnected", Context.ConnectionId);
-
         await base.OnDisconnectedAsync(exception);
     }
 
@@ -48,5 +53,4 @@ public class VideoCallHub : Hub
     {
         await Clients.Client(targetConnectionId).SendAsync("ReceiveIceCandidate", Context.ConnectionId, candidate);
     }
-
 }
