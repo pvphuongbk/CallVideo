@@ -1,11 +1,11 @@
 ﻿@{
-    ViewData["Title"] = "Video Call";
+    ViewData["Title"] = "Voice Call";
 }
 
-<h2>Video Call</h2>
+<h2>Voice Call</h2>
 
 <select id="userList"></select>
-<button id="callVideoButton">Video Call</button>
+<button id="callButton">Voice Call</button>
 
 <br />
 <br />
@@ -16,6 +16,8 @@
 <script src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
 
 <script>
+
+
     const connection = new signalR.HubConnectionBuilder().withUrl("/videoCallHub").build();
     let myConnectionId = '';
     let localStream;
@@ -102,13 +104,14 @@
     });
 
     // Sự kiện click nút Call
-    document.getElementById("callVideoButton").addEventListener("click", async () => {
+    document.getElementById("callButton").addEventListener("click", async () => {
         targetConnectionId = document.getElementById("userList").value;
         if (!targetConnectionId) {
             alert('Vui lòng chọn người muốn gọi.');
             return;
         }
 
+        console.log("Calling user: " + targetConnectionId);
         if (!localStream) {
             alert('Không tìm thấy camera/micro. Vui lòng kiểm tra thiết bị.');
             return;
@@ -123,10 +126,11 @@
             .catch(err => console.error(err.toString()));
     });
 
+
     // Mở camera/micro
     async function startLocalStream() {
         try {
-            localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            localStream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
             document.getElementById('localVideo').srcObject = localStream;
         } catch (error) {
             console.error('Không thể truy cập camera/micro:', error);
@@ -155,4 +159,5 @@
             }
         };
     }
+
 </script>
