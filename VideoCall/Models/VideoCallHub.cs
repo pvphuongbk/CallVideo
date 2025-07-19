@@ -20,7 +20,12 @@ public class VideoCallHub : Hub
 
         await base.OnConnectedAsync();
     }
+    //private static Dictionary<string, string> ConnectedUsers = new Dictionary<string, string>();
 
+    public async Task CancelCall(string toConnectionId)
+    {
+        await Clients.Client(toConnectionId).SendAsync("CallCancelled", Context.ConnectionId);
+    }
     public async Task CallUser(string connectionId)
     {
         await Clients.Client(connectionId).SendAsync("ReceiveCall", Context.ConnectionId);

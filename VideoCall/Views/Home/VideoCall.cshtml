@@ -5,7 +5,10 @@
 <h2>Video Call</h2>
 
 <select id="userList"></select>
-<button id="callVideoButton">Video Call</button>
+
+<button id="callButton" style="background-color: green; color: white;">Video Call</button>
+<button id="cancelCallButton" style="display:none; margin-left:10px;">Cancel</button>
+
 <div id="callNotification" style="display:none; background:yellow; padding:10px; margin-top:10px;"></div>
 
 <br />
@@ -24,6 +27,8 @@
     let targetConnectionId = '';
     let userList = [];
     const configuration = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+    let isCalling = false;
+    let hasSentCancel = false;
 
     connection.start().then(() => {
         console.log("SignalR connected.");
@@ -104,20 +109,71 @@
         }
     });
 
-    document.getElementById("callVideoButton").addEventListener("click", async () => {
+    document.getElementById("callButton").addEventListener("click", async () => {
+        if (isCalling) return;
+
         targetConnectionId = document.getElementById("userList").value;
         if (!targetConnectionId) {
             alert('Vui lòng chọn người muốn gọi.');
             return;
         }
 
+        await startLocalStream();
+
         if (!localStream) {
             alert('Không tìm thấy camera/micro. Vui lòng kiểm tra thiết bị.');
             return;
         }
 
+        isCalling = true;
         connection.invoke("CallUser", targetConnectionId);
+
+        // Giao diện thay đổi
+        const callBtn = document.getElementById("callButton");
+        callBtn.style.backgroundColor = "red";
+        callBtn.innerText = "Đang gọi...";
+        document.getElementById("cancelCallButton").style.display = "inline-block";
     });
+    document.getElementById("cancelCallButton").addEventListener("click", () => {
+        endCall();
+    });
+    function endCall() {
+        if (peerConnection) {
+            peerConnection.close();
+            peerConnection = null;
+        }
+
+        if (localStream) {
+            localStream.getTracks().forEach(track => track.stop());
+            localStream = null;
+        }
+
+        document.getElementById("localVideo").srcObject = null;
+        document.getElementById("remoteVideo").srcObject = null;
+
+        if (!hasSentCancel && targetConnectionId) {
+            connection.invoke("CancelCall", targetConnectionId);
+            hasSentCancel = true;
+        }
+        isCalling = false;
+
+        // Giao diện reset
+        const callBtn = document.getElementById("callButton");
+        callBtn.style.backgroundColor = "green";
+        callBtn.innerText = "Video Call";
+        document.getElementById("cancelCallButton").style.display = "none";
+        connection.invoke("CancelCall", targetConnectionId);
+
+    }
+
+    connection.on("CallCancelled", (fromConnectionId) => {
+        if (!hasSentCancel) {
+            alert(`Người dùng đã hủy cuộc gọi.`);
+            hasSentCancel = true;
+            endCall();
+        }
+    });
+
 
     async function acceptCall(fromConnectionId) {
         document.getElementById("callNotification").style.display = "none";
@@ -125,12 +181,18 @@
         await connection.invoke("AcceptCall", fromConnectionId);
     }
 
+
     async function startLocalStream() {
         try {
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+            }
+
             localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
             document.getElementById('localVideo').srcObject = localStream;
         } catch (error) {
             console.error('Không thể truy cập camera/micro:', error);
+            localStream = null;
             alert('Không thể truy cập camera/micro. Vui lòng kiểm tra thiết bị hoặc cấp quyền.');
         }
     }
