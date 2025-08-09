@@ -3,7 +3,8 @@ using System;
 
 public class VideoCallHub : Hub
 {
-    public static List<string> ConnectedUsers = new List<string>();
+    //public static List<string> ConnectedUsers = new List<string>();
+    public static HashSet<string> ConnectedUsers = new HashSet<string>();
 
     public override async Task OnConnectedAsync()
     {
