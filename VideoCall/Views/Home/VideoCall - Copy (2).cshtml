@@ -1,0 +1,168 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>Video Call with SignalR + WebRTC</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/7.0.5/signalr.min.js"></script>
+    <style>
+        video {
+            width: 45%;
+            margin: 5px;
+            border: 2px solid #444;
+        }
+    </style>
+</head>
+<body>
+    <h2>Video Call</h2>
+
+    <div>
+        <video id="localVideo" autoplay muted playsinline></video>
+        <video id="remoteVideo" autoplay playsinline></video>
+    </div>
+
+    <h3>Online Users</h3>
+    <ul id="userList"></ul>
+
+    <script>
+        let connection;
+        let myId = null;
+        let peerConnection = null;
+        let localStream = null;
+        const config = {
+            iceServers: [
+                {
+                    urls: "stun:stun.l.google.com:19302"
+                },
+                {
+                    urls: "turn:210.245.84.117:3478",
+                    username: "turnuser",
+                    credential: "12345678"
+                }
+            ]
+        };
+
+        async function init() {
+            debugger;
+            connection = new signalR.HubConnectionBuilder()
+                .withUrl("/videocallhub")
+                .build();
+
+            connection.on("ReceiveYourId", id => {
+                debugger;
+                myId = id;
+            });
+
+            connection.on("ReceiveUserList", users => {
+                debugger;
+                const list = document.getElementById("userList");
+                list.innerHTML = '';
+                users.forEach(userId => {
+                    debugger;
+                    if (userId === myId) return;
+                    const li = document.createElement("li");
+                    li.innerText = userId;
+                    li.style.cursor = "pointer";
+                    li.onclick = () => startCall(userId);
+                    list.appendChild(li);
+                });
+            });
+
+            connection.on("UserConnected", userId => {
+                debugger;
+                if (userId === myId) return;
+                const list = document.getElementById("userList");
+                const li = document.createElement("li");
+                li.innerText = userId;
+                li.style.cursor = "pointer";
+                li.onclick = () => startCall(userId);
+                list.appendChild(li);
+            });
+
+            connection.on("UserDisconnected", userId => {
+                debugger;
+                const list = document.getElementById("userList");
+                [...list.children].forEach(li => {
+                    if (li.innerText === userId) list.removeChild(li);
+                });
+            });
+
+            connection.on("ReceiveOffer", async (fromId, offer) => {
+                peerConnection = createPeerConnection(fromId);
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(JSON.parse(offer)));
+
+                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                document.getElementById("localVideo").srcObject = localStream;
+                localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+
+                const answer = await peerConnection.createAnswer();
+                await peerConnection.setLocalDescription(answer);
+                connection.invoke("SendAnswer", fromId, JSON.stringify(answer));
+            });
+
+            connection.on("ReceiveAnswer", async (fromId, answer) => {
+                if (peerConnection) {
+                    await peerConnection.setRemoteDescription(new RTCSessionDescription(JSON.parse(answer)));
+                }
+            });
+
+            connection.on("ReceiveIceCandidate", async (fromId, candidate) => {
+                if (peerConnection && candidate) {
+                    try {
+                        await peerConnection.addIceCandidate(new RTCIceCandidate(JSON.parse(candidate)));
+                    } catch (err) {
+                        console.warn("Error adding ICE candidate", err);
+                    }
+                }
+            });
+
+            await connection.start();
+        }
+
+        function createPeerConnection(toId) {
+            const pc = new RTCPeerConnection(config);
+
+            pc.onicecandidate = e => {
+                if (e.candidate) {
+                    connection.invoke("SendIceCandidate", toId, JSON.stringify(e.candidate));
+                }
+            };
+
+            pc.ontrack = e => {
+                document.getElementById("remoteVideo").srcObject = e.streams[0];
+            };
+
+            pc.onconnectionstatechange = () => {
+                if (pc.connectionState === "disconnected" || pc.connectionState === "failed") {
+                    pc.close();
+                }
+            };
+
+            return pc;
+        }
+
+        async function startCall(toId) {
+            localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            document.getElementById("localVideo").srcObject = localStream;
+
+            peerConnection = createPeerConnection(toId);
+            localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
+            connection.invoke("SendOffer", toId, JSON.stringify(offer));
+        }
+
+        window.onbeforeunload = () => {
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+            if (connection) {
+                connection.stop();
+            }
+        };
+
+        init();
+    </script>
+</body>
+</html>

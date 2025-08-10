@@ -6,4 +6,8 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\VideoCall.Common\VideoCall.Common.csproj" />
+  </ItemGroup>
+
 </Project>

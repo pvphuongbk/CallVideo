@@ -1,18 +1,81 @@
-﻿<!DOCTYPE html>
+﻿@using VideoCall.DataAccess.Entities
+@model UserCall
+
+
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8" />
     <title>Voice Call with SignalR + WebRTC</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/7.0.5/signalr.min.js"></script>
+    <style>
+        video {
+            width: 45%;
+            margin: 5px;
+            border: 2px solid #444;
+        }
+    </style>
+    <style>
+        .modal {
+            display: none; /* Ẩn mặc định */
+            position: fixed;
+            z-index: 9999;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+
+        .modal-content {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            width: 300px;
+            margin: 15% auto;
+            text-align: center;
+        }
+
+        .modal-actions button {
+            margin: 5px;
+            padding: 8px 16px;
+            border: none;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+
+        .btn-accept {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .btn-reject {
+            background: #f44336;
+            color: white;
+        }
+    </style>
 </head>
 <body>
     <h2>Voice Call</h2>
+    <h2>@Model.Fullname</h2>
 
-    <audio id="remoteAudio" autoplay></audio>
+    <div>
+        <video id="localVideo" autoplay muted playsinline></video>
+        <video id="remoteVideo" autoplay playsinline></video>
+    </div>
 
-    <h3>Online Users</h3>
+    <h3>Danh sách người dùng</h3>
     <ul id="userList"></ul>
 
+    <div id="callModal" class="modal">
+        <div class="modal-content">
+            <h3 id="callTitle"></h3>
+            <div class="modal-actions">
+                <button id="acceptCallBtn" class="btn-accept">Chấp nhận</button>
+                <button id="rejectCallBtn" class="btn-reject">Hủy</button>
+            </div>
+        </div>
+    </div>
     <script>
         let connection;
         let myId = null;
@@ -20,7 +83,9 @@
         let localStream = null;
         const config = {
             iceServers: [
-                { urls: "stun:stun.l.google.com:19302" },
+                {
+                    urls: "stun:stun.l.google.com:19302"
+                },
                 {
                     urls: "turn:210.245.84.117:3478",
                     username: "turnuser",
@@ -30,6 +95,7 @@
         };
 
         async function init() {
+            debugger;
             connection = new signalR.HubConnectionBuilder()
                 .withUrl("/videocallhub")
                 .build();
@@ -39,54 +105,92 @@
             });
 
             connection.on("ReceiveUserList", users => {
+                debugger;
                 const list = document.getElementById("userList");
                 list.innerHTML = '';
-                users.forEach(userId => {
-                    if (userId === myId) return;
+                users.forEach(user => {
+                    debugger;
+                    if (user.callId === myId) return;
                     const li = document.createElement("li");
-                    li.innerText = userId;
-
-                    const callBtn = document.createElement("button");
-                    callBtn.textContent = "📞";
-                    callBtn.onclick = () => startCall(userId);
-
-                    li.appendChild(callBtn);
+                    li.innerText = user.fullname;
+                    li.id = user.callId; // Lưu videoId vào id của li
+                    li.style.cursor = "pointer";
+                    if (user.status === false) {
+                        li.style.opacity = "0.5"; // Làm mờ
+                        li.style.pointerEvents = "none"; // Vô hiệu hóa click
+                    } else {
+                        li.onclick = () => startCall(user.callId);
+                    }
                     list.appendChild(li);
                 });
             });
 
-            connection.on("UserConnected", userId => {
-                if (userId === myId) return;
+            connection.on("UserConnected", user => {
+                debugger;
+                if (user.callId === myId) return;
                 const list = document.getElementById("userList");
                 const li = document.createElement("li");
-                li.innerText = userId;
-
-                const callBtn = document.createElement("button");
-                callBtn.textContent = "📞";
-                callBtn.onclick = () => startCall(userId);
-
-                li.appendChild(callBtn);
+                li.innerText = user.fullname;
+                li.id = user.callId; // Lưu videoId vào id của li
+                li.style.cursor = "pointer";
+                if (user.status === false)
+                {
+                    li.style.opacity = "0.5"; // Làm mờ
+                    li.style.pointerEvents = "none"; // Vô hiệu hóa click
+                } else {
+                    li.onclick = () => startCall(user.callId);
+                }
                 list.appendChild(li);
             });
 
-            connection.on("UserDisconnected", userId => {
+            connection.on("UserDisconnected", callId => {
+                debugger;
                 const list = document.getElementById("userList");
                 [...list.children].forEach(li => {
-                    if (li.innerText.includes(userId)) list.removeChild(li);
+                    if (li.id === callId) list.removeChild(li);
                 });
             });
 
-            connection.on("ReceiveOffer", async (fromId, offer) => {
-                peerConnection = createPeerConnection(fromId);
-                await peerConnection.setRemoteDescription(new RTCSessionDescription(JSON.parse(offer)));
+            connection.on("ReceiveOffer", (fromUser, offer) => {
+                // Hiện nút chấp nhận
+                // const acceptButton = document.createElement("button");
+                // acceptButton.textContent = "Chấp nhận cuộc gọi từ " + fromUser.fullname;
+                document.getElementById("callTitle").textContent = "Cuộc gọi từ " + fromUser.fullname;
+                document.getElementById("callModal").style.display = "block";
 
-                localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+                document.getElementById("acceptCallBtn").onclick = async () => {
+                    try {
+                        const devices = await navigator.mediaDevices.enumerateDevices();
+                        const hasAudio = devices.some(device => device.kind === 'audioinput');
 
-                const answer = await peerConnection.createAnswer();
-                await peerConnection.setLocalDescription(answer);
-                connection.invoke("SendAnswer", fromId, JSON.stringify(answer));
+                        if (!hasAudio) {
+                            alert("Không tìm thấy  micro. Vui lòng kết nối thiết bị.");
+                            return;
+                        }
+
+                        localStream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
+                        document.getElementById("localVideo").srcObject = localStream;
+
+                        peerConnection = createPeerConnection(fromUser.callId);
+                        localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+
+                        await peerConnection.setRemoteDescription(new RTCSessionDescription(JSON.parse(offer)));
+                        const answer = await peerConnection.createAnswer();
+                        await peerConnection.setLocalDescription(answer);
+                        connection.invoke("SendAnswer", fromUser.callId, JSON.stringify(answer));
+
+                        closeModal(); // Ẩn nút khi đã chấp nhận
+                    } catch (err) {
+                        alert("Không thể truy cập micro: " + err.message);
+                    }
+                };
+                document.getElementById("rejectCallBtn").onclick = () => {
+                connection.invoke("CancelCall", fromUser.callId);
+                closeModal();
+            };
+                document.body.appendChild(acceptButton);
             });
+
 
             connection.on("ReceiveAnswer", async (fromId, answer) => {
                 if (peerConnection) {
@@ -103,8 +207,33 @@
                     }
                 }
             });
-
+            connection.on("UpdateUserList", (users) => {
+                const list = document.getElementById("userList");
+                list.innerHTML = '';
+                users.forEach(user => {
+                    if (user.callId === myId) return;
+                    const li = document.createElement("li");
+                    li.innerText = user.fullname;
+                    li.id = user.callId; // Lưu videoId vào id của li
+                    li.style.cursor = "pointer";
+                    if (user.status === false) {
+                        li.style.opacity = "0.5"; // Làm mờ
+                        li.style.pointerEvents = "none"; // Vô hiệu hóa click
+                    } else {
+                        li.onclick = () => startCall(user.callId);
+                    }
+                    list.appendChild(li);
+                });
+            });
+            connection.on("RedirectToLogin", function () {
+                window.location.href = "home/login";
+            });
             await connection.start();
+        }
+
+                // Hàm đóng modal
+        function closeModal() {
+            document.getElementById("callModal").style.display = "none";
         }
 
         function createPeerConnection(toId) {
@@ -117,7 +246,7 @@
             };
 
             pc.ontrack = e => {
-                document.getElementById("remoteAudio").srcObject = e.streams[0];
+                document.getElementById("remoteVideo").srcObject = e.streams[0];
             };
 
             pc.onconnectionstatechange = () => {
@@ -130,7 +259,17 @@
         }
 
         async function startCall(toId) {
-            localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            debugger
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const hasAudio = devices.some(device => device.kind === 'audioinput');
+
+            if (!hasAudio) {
+                alert("Không tìm thấy micro. Vui lòng kết nối thiết bị.");
+                return;
+            } 
+
+            localStream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
+            document.getElementById("localVideo").srcObject = localStream;
 
             peerConnection = createPeerConnection(toId);
             localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
